@@ -26,6 +26,10 @@ function normalizeUrls(params: { url?: unknown; urls?: unknown }): string[] {
 		.slice(0, 20);
 }
 
+function contentPreview(value: string, maxLength = 180): string {
+	return truncate(value.replace(/\s+/g, " ").trim(), maxLength);
+}
+
 function formatFetched(results: Array<{ url: string; title: string; content: string; error: string | null }>): string {
 	return results.map((result) => {
 		const header = result.title ? `# ${result.title}\n\n` : "";
@@ -232,7 +236,12 @@ export default function register(pi: ExtensionAPI): void {
 			pi.appendEntry("web-search-results", stored);
 			return {
 				content: [{ type: "text", text: formatFetched(results) || "No content." }],
-				details: { responseId, urlCount: urls.length, errorCount: results.filter((result) => result.error).length },
+				details: {
+					responseId,
+					urlCount: urls.length,
+					errorCount: results.filter((result) => result.error).length,
+					urls: results.map(({ url, title, content, error }) => ({ url, title, preview: contentPreview(content), error })),
+				},
 			};
 		},
 
@@ -241,11 +250,26 @@ export default function register(pi: ExtensionAPI): void {
 			return new Text(theme.fg("toolTitle", theme.bold("fetch ")) + theme.fg("accent", urls.length ? `${urls.length} URL${urls.length === 1 ? "" : "s"}` : "(no URL)"), 0, 0);
 		},
 
-		renderResult(result, { isPartial }, theme) {
+		renderResult(result, { isPartial, expanded }, theme) {
 			if (isPartial) return new Text(theme.fg("accent", "fetching..."), 0, 0);
-			const details = result.details as { urlCount?: number; errorCount?: number; error?: string } | undefined;
+			const details = result.details as {
+				urlCount?: number;
+				errorCount?: number;
+				error?: string;
+				urls?: Array<{ url: string; title: string; preview: string; error: string | null }>;
+			} | undefined;
 			if (details?.error) return new Text(theme.fg("error", `Error: ${details.error}`), 0, 0);
-			return new Text(theme.fg("success", `Fetched ${details?.urlCount ?? 0} URL${details?.urlCount === 1 ? "" : "s"}${details?.errorCount ? ` (${details.errorCount} failed)` : ""}`), 0, 0);
+
+			const lines = [theme.fg("success", `Fetched ${details?.urlCount ?? 0} URL${details?.urlCount === 1 ? "" : "s"}${details?.errorCount ? ` (${details.errorCount} failed)` : ""}`)];
+		for (const item of (expanded ? details?.urls ?? [] : (details?.urls ?? []).slice(0, 3))) {
+			const label = item.title ? `${item.title} — ${item.url}` : item.url;
+			lines.push(theme.fg(item.error ? "error" : "dim", `  ▸ ${truncate(label, 120)}`));
+			if (expanded && item.preview) lines.push(theme.fg("muted", `    ${item.preview}`));
+		}
+		if (!expanded && (details?.urls?.length ?? 0) > 3) {
+			lines.push(theme.fg("muted", `  ... and ${(details?.urls?.length ?? 0) - 3} more (ctrl+o to expand)`));
+		}
+		return new Text(lines.join("\n"), 0, 0);
 		},
 	});
 
@@ -263,7 +287,16 @@ export default function register(pi: ExtensionAPI): void {
 		async execute(_callId, params) {
 			if (typeof params.responseId === "string" && params.responseId.trim()) {
 				const result = getResult(params.responseId.trim());
-				return { content: [{ type: "text", text: formatStored(result) }], details: { responseId: params.responseId.trim(), found: !!result } };
+				const storedText = formatStored(result);
+				return {
+					content: [{ type: "text", text: storedText }],
+					details: {
+						responseId: params.responseId.trim(),
+						found: !!result,
+						preview: contentPreview(storedText, 220),
+						expandedPreview: contentPreview(storedText, 800),
+					},
+				};
 			}
 			const url = typeof params.url === "string" ? params.url.trim() : "";
 			const query = typeof params.query === "string" ? params.query.trim().toLowerCase() : "";
@@ -273,16 +306,33 @@ export default function register(pi: ExtensionAPI): void {
 				return false;
 			});
 			const result = matches.at(-1) ?? null;
-			return { content: [{ type: "text", text: formatStored(result) }], details: { responseId: result?.id ?? "", found: !!result } };
+			const storedText = formatStored(result);
+			return {
+				content: [{ type: "text", text: storedText }],
+				details: {
+					responseId: result?.id ?? "",
+					found: !!result,
+					preview: contentPreview(storedText, 220),
+					expandedPreview: contentPreview(storedText, 800),
+				},
+			};
 		},
 
 		renderCall(_args, theme) {
 			return new Text(theme.fg("toolTitle", theme.bold("get stored web content")), 0, 0);
 		},
 
-		renderResult(result, _options, theme) {
-			const details = result.details as { found?: boolean } | undefined;
-			return new Text(details?.found ? theme.fg("success", "Stored content retrieved") : theme.fg("warning", "No stored content found"), 0, 0);
+		renderResult(result, { isPartial, expanded }, theme) {
+			if (isPartial) return new Text(theme.fg("accent", "retrieving stored content..."), 0, 0);
+			const details = result.details as { found?: boolean; preview?: string; expandedPreview?: string } | undefined;
+			if (!details?.found) return new Text(theme.fg("warning", "No stored content found"), 0, 0);
+			const preview = expanded ? details.expandedPreview : details.preview;
+			const lines = [theme.fg("success", "Stored content retrieved")];
+			if (preview) lines.push(theme.fg("dim", preview));
+			if (!expanded && details.expandedPreview && details.expandedPreview.length > (details.preview?.length ?? 0)) {
+				lines.push(theme.fg("muted", "... (ctrl+o to expand)"));
+			}
+			return new Text(lines.join("\n"), 0, 0);
 		},
 	});
 }
