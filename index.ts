@@ -39,6 +39,16 @@ function formatStored(data: ReturnType<typeof getResult>): string {
 	return formatFetched(data.urls ?? []);
 }
 
+function truncate(value: string, maxLength: number): string {
+	return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
+}
+
+function sourceLabel(source: { title: string; url: string }): string {
+	const title = truncate(source.title, 72);
+	const url = truncate(source.url.replace(/^https?:\/\//, ""), 84);
+	return `  ▸ ${title} — ${url}`;
+}
+
 function formatResults(results: QueryResult[]): string {
 	const lines: string[] = [];
 	for (const result of results) {
@@ -140,6 +150,7 @@ export default function register(pi: ExtensionAPI): void {
 					responseId,
 					queryCount: queries.length,
 					totalResults: results.reduce((total, result) => total + result.results.length, 0),
+					sources: results.flatMap((result) => result.results.map(({ title, url }) => ({ title, url }))),
 					summary: summary ? { model: summary.model } : undefined,
 				},
 			};
@@ -152,14 +163,30 @@ export default function register(pi: ExtensionAPI): void {
 			return new Text(theme.fg("toolTitle", theme.bold("search ")) + theme.fg("accent", label), 0, 0);
 		},
 
-		renderResult(result, { isPartial }, theme) {
-			const details = result.details as { phase?: string; query?: string; model?: string; totalResults?: number; error?: string } | undefined;
+		renderResult(result, { isPartial, expanded }, theme) {
+			const details = result.details as {
+				phase?: string;
+				query?: string;
+				model?: string;
+				totalResults?: number;
+				sources?: Array<{ title: string; url: string }>;
+				error?: string;
+			} | undefined;
 			if (isPartial) {
 				const suffix = details?.phase === "summarizing" && details.model ? ` with ${details.model}` : "";
 				return new Text(theme.fg("accent", `${details?.phase ?? "searching"}${suffix}${details?.query ? `: ${details.query}` : "..."}`), 0, 0);
 			}
 			if (details?.error) return new Text(theme.fg("error", `Error: ${details.error}`), 0, 0);
-			return new Text(theme.fg("success", `${details?.totalResults ?? 0} Exa sources`), 0, 0);
+
+			const sources = details?.sources ?? [];
+			const lines = [theme.fg("success", `${details?.totalResults ?? 0} Exa sources`)];
+			for (const source of (expanded ? sources : sources.slice(0, 3))) {
+				lines.push(theme.fg("dim", sourceLabel(source)));
+			}
+			if (!expanded && sources.length > 3) {
+				lines.push(theme.fg("muted", `  ... and ${sources.length - 3} more (ctrl+o to expand)`));
+			}
+			return new Text(lines.join("\n"), 0, 0);
 		},
 	});
 
