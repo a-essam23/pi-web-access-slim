@@ -33,9 +33,27 @@ function formatFetched(results: Array<{ url: string; title: string; content: str
 	}).join("\n\n---\n\n");
 }
 
+function formatStoredSearch(results: QueryResult[]): string {
+	const lines: string[] = [];
+	for (const result of results) {
+		lines.push(`Query: ${result.query}`);
+		if (result.error) {
+			lines.push(`Error: ${result.error}`, "");
+			continue;
+		}
+		for (const [index, source] of result.results.entries()) {
+			lines.push(`${index + 1}. ${source.title}`, `   ${source.url}`);
+			if (source.content) lines.push("", source.content);
+			else if (source.snippet) lines.push("", source.snippet);
+			lines.push("");
+		}
+	}
+	return lines.join("\n").trim();
+}
+
 function formatStored(data: ReturnType<typeof getResult>): string {
 	if (!data) return "No stored result found.";
-	if (data.type === "search") return formatResults(data.queries ?? []);
+	if (data.type === "search") return formatStoredSearch(data.queries ?? []);
 	return formatFetched(data.urls ?? []);
 }
 

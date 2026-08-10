@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import register from "../index.ts";
 import { loadConfig } from "../config.ts";
 import { searchExa } from "../search.ts";
 
@@ -19,6 +20,7 @@ test("searchExa uses only the Exa REST endpoint", async () => {
 				url: "https://example.com/article",
 				publishedDate: "2026-01-01",
 				highlights: ["Useful excerpt"],
+				text: "Full Exa page content.",
 			}],
 		});
 	};
@@ -42,6 +44,7 @@ test("searchExa uses only the Exa REST endpoint", async () => {
 			url: "https://example.com/article",
 			publishedDate: "2026-01-01",
 			snippet: "Useful excerpt",
+			content: "Full Exa page content.",
 		});
 	} finally {
 		globalThis.fetch = originalFetch;
@@ -76,5 +79,33 @@ test("loadConfig reads summary defaults", () => {
 	} finally {
 		if (originalDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = originalDir;
+	}
+});
+
+test("get_search_content returns Exa content when it was requested", async () => {
+	const originalFetch = globalThis.fetch;
+	const originalKey = process.env.EXA_API_KEY;
+	process.env.EXA_API_KEY = "exa-test-key";
+	globalThis.fetch = async () => Response.json({
+		results: [{
+			title: "Exa result",
+			url: "https://example.com/article",
+			highlights: ["Short excerpt"],
+			text: "Full page body returned by Exa.",
+		}],
+	});
+
+	try {
+		const tools = new Map();
+		register({ on() {}, registerTool(tool) { tools.set(tool.name, tool); }, appendEntry() {} });
+		const search = tools.get("web_search");
+		const stored = tools.get("get_search_content");
+		const searchResult = await search.execute("search", { query: "content test", includeContent: true }, undefined, undefined, undefined);
+		const retrieved = await stored.execute("retrieve", { responseId: searchResult.details.responseId }, undefined, undefined, undefined);
+		assert.match(retrieved.content[0].text, /Full page body returned by Exa\./);
+	} finally {
+		globalThis.fetch = originalFetch;
+		if (originalKey === undefined) delete process.env.EXA_API_KEY;
+		else process.env.EXA_API_KEY = originalKey;
 	}
 });

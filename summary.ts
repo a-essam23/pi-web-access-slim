@@ -2,6 +2,8 @@ import { complete, type Message } from "@earendil-works/pi-ai/compat";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { QueryResult } from "./search.ts";
 
+const MAX_SUMMARY_SOURCE_CHARS = 8_000;
+
 export type SummaryContext = Pick<ExtensionContext, "modelRegistry">;
 
 function parseModelSelector(value: string): { provider: string; id: string } {
@@ -29,7 +31,8 @@ function buildPrompt(results: QueryResult[]): string {
 		}
 		for (const [index, source] of result.results.entries()) {
 			sections.push(`[${index + 1}] ${source.title} — ${source.url}`);
-			if (source.snippet) sections.push(source.snippet);
+			const evidence = source.content || source.snippet;
+			if (evidence) sections.push(evidence.slice(0, MAX_SUMMARY_SOURCE_CHARS));
 		}
 	}
 	sections.push("</search_results>");
